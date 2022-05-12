@@ -1,0 +1,78 @@
+pipeline {
+  agent any
+  environment {
+    imageName = 'bkam-iam-api'
+    registryCredentials = 'nexus'
+    registry = 'nexus.mobiblanc.tech'
+    gitAccess = credentials('gitblanctech')
+    giphyApi = credentials('giphy')
+    gitRepo = 'git.blanc.tech/bkam/bkam-iam-api.git'
+    capRoverPushURL = "paste link here"
+    max = 500
+    random_num = "${Math.abs(new Random().nextInt(max+1))}"
+  }
+  stages {
+    stage('Building docker image') {
+      steps {
+        script {
+          dockerImage = docker.build( registry + "/$imageName" + ':0.' + "$BUILD_NUMBER", '-f ./DockerfileDev .')
+        }
+      }
+    }
+    stage('Uploading to Nexus') {
+      steps{  
+        script {
+          docker.withRegistry( 'https://'+registry, registryCredentials ) {
+            dockerImage.push('latest')
+            dockerImage.push("0." + "$BUILD_NUMBER")
+          }
+        }
+      }
+    }
+    stage('Remove docker image') {
+      steps {
+        script {
+          sh 'docker rmi -f ' + registry + "/$imageName" + ':0.' + "$BUILD_NUMBER"
+        }
+      }
+    }
+    stage('Tag version on GIT') {
+      steps {
+        script {
+            sh "git config --global user.email 'jenkins@mobiblanc.tech' && git config --global user.name 'Jenkins'"
+            sh "git tag -a 0." + "$BUILD_NUMBER" + " -m 'Jenking autoTag : Version 0." + "$BUILD_NUMBER" + "'"
+            sh "git push http://$gitAccess@$gitRepo --tags"
+        }
+      }
+    }
+    stage('Deploy to Caprover') {
+      steps {
+        script {
+            sh "curl -X POST '$capRoverPushURL'"
+            BUILD_TRIGGER_BY = "${currentBuild.getBuildCauses()[0].shortDescription}"
+        }
+      }
+    }
+  }
+  post {
+    always {
+      script {
+        GIT_COMMIT_MSG = sh (script: "git log -1 --pretty=%B $GIT_COMMIT", returnStdout: true).trim()
+        CHAT_USERNAME_LOWER = sh (script : "echo '$BUILD_TRIGGER_BY' | awk '{printf(\"%s \",\$NF);}'| cut -d\' \' -f1 | tr [:upper:] [:lower:]", returnStdout: true).trim()
+        RESULT_EMOJI = sh (script : "if [ '$currentBuild.result\' = 'SUCCESS' ]; then echo '✅';else echo '❌'; fi",returnStdout:true).trim()
+        GIF_RESULT = sh (
+          script: "curl -s 'https://api.giphy.com/v1/gifs/search?api_key=$env.giphyApi&q=$currentBuild.result&limit=1&offset=$env.random_num&rating=g&lang=fr'| jq -r '.data[0].images.downsized.url'",
+          returnStdout: true
+        ).trim() 
+        sh "curl -X POST -H 'Content-Type: application/json' --data '{\"alias\":\"Jenkins\",\"avatar\":\"https://s3.mobiblanc.tech/chat-internal-app/jenkins.png\",\"channel\":\"@$CHAT_USERNAME_LOWER\",\"text\":\"BUILD $currentBuild.fullDisplayName » $currentBuild.result $RESULT_EMOJI \",\"attachments\":[{\"title\":\"POUR PLUS DE DÉTAILS VISITEZ JENKINS ICI\",\"title_link\":\"$JOB_URL\",\"fields\":[{\"short\": false,\"title\":\"RESULT\",\"value\":\"$currentBuild.result\"},{\"short\":false,\"title\":\"BUILD DURATION\", \"value\":\"$currentBuild.durationString\"},{\"short\":false,\"title\":\"ORIGIN\",\"value\": \"$BUILD_TRIGGER_BY\"},{\"short\":false,\"title\":\"COMMIT REASON\",\"value\":\"$GIT_COMMIT_MSG\"}],\"image_url\":\"$GIF_RESULT\",\"color\":\"#764FA5\"}]}' https://chat.mobiblanc.tech/hooks/626de67dbce63eef68802720/yBXcXnAtjTKSFuG5qNYq623avdcLfREbmeYsP9gs3hKtoKBx"
+        sh "curl -X POST -H 'Content-Type: application/json' --data '{\"alias\":\"Jenkins\",\"avatar\":\"https://s3.mobiblanc.tech/chat-internal-app/jenkins.png\",\"text\":\"BUILD $currentBuild.fullDisplayName » $currentBuild.result $RESULT_EMOJI \",\"attachments\":[{\"title\":\"POUR PLUS DE DÉTAILS VISITEZ JENKINS ICI\",\"title_link\":\"$JOB_URL\",\"fields\":[{\"short\": false,\"title\":\"RESULT\",\"value\":\"$currentBuild.result\"},{\"short\":false,\"title\":\"BUILD DURATION\", \"value\":\"$currentBuild.durationString\"},{\"short\":false,\"title\":\"ORIGIN\",\"value\": \"$BUILD_TRIGGER_BY\"},{\"short\":false,\"title\":\"COMMIT REASON\",\"value\":\"$GIT_COMMIT_MSG\"}],\"image_url\":\"$GIF_RESULT\",\"color\":\"#764FA5\"}]}' https://chat.mobiblanc.tech/hooks/626de67dbce63eef68802720/yBXcXnAtjTKSFuG5qNYq623avdcLfREbmeYsP9gs3hKtoKBx"
+      }
+    }
+  success{
+		logstashSend failBuild: false, maxLines: 1 
+		}
+	failure{
+		logstashSend failBuild: true, maxLines: 100
+		}
+  }
+}

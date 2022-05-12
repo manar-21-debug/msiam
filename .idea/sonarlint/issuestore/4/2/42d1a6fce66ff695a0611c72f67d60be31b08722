@@ -1,0 +1,11 @@
+
+M
+java:S1068 "2Remove this unused "emailValidator" private field.(éŠ¹ÿÿÿÿÿ
+J
+java:S1068""/Remove this unused "emailSender" private field.(Ïıó¥ùÿÿÿÿ
+c
+java:S1192p"HDefine a constant instead of duplicating this literal "NO_DATA" 8 times.(§ğˆşÿÿÿÿ
+v
+java:S1488¾"_Immediately return this expression instead of assigning it to the temporary variable "userDTO".(»áèÍ
+|
+java:S1488Õ"eImmediately return this expression instead of assigning it to the temporary variable "encodedString".(©äãÌ
